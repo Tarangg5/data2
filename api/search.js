@@ -1,67 +1,59 @@
-export default async function handler(req, res) {
-    // 1. URL se stream ID nikalna (?id=2494 ya ?id=660641)
-    let { id } = req.query;
+addEventListener('fetch', event => {
+  event.respondWith(handleRequest(event.request))
+})
 
-    if (!id) {
-        return res.status(400).send("Error: Stream ID missing!");
-    }
+async function handleRequest(request) {
+  const jsonUrl = "https://binge-giotv.pages.dev/data/id.json";
 
-    // Agar ID ke saath .ts likha ho, toh use saaf karna
-    id = id.replace('.ts', '');
-
-    // 2. Naya Host IP jo aapne nikaala aur aapke credentials
-    const currentHost = "http://188.241.218.179:80"; // Agar bina port ke na chale toh :80 ya :8080 lagta hai, abhi standard rakhte hain
-    const username = "0AEHQ64ukI";
-    const password = "50yxz17DyG";
-
-    // Standard IPTV Stream URL Format
-    const realIPTVURL = `${currentHost}/live/${username}/${password}/${id}.ts`;
-
-    try {
-        // 3. Naye IP Server se stream fetch karna
-        const response = await fetch(realIPTVURL, {
-            headers: {
-                'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0'
-            }
-        });
-
-        // Agar server fir bhi mana kare toh error response dikhana
-        if (!response.ok) {
-            return res.status(response.status).send(`IPTV Server Responded with: ${response.status}`);
-        }
-
-        // 4. Player ke liye Headers set karna (CORS Bypass)
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-        res.setHeader('Content-Type', response.headers.get('content-type') || 'video/mp2t');
-
-        // 5. Video stream ko pipe/forward karna
-        const nodeReadableStream = ReadableStreamToNodeStream(response.body);
-        nodeReadableStream.pipe(res);
-
-    } catch (error) {
-        console.error("Proxy Error:", error);
-        return res.status(500).send("Server Connection Error");
-    }
-}
-
-// Stream Converter Helper
-function ReadableStreamToNodeStream(readableStream) {
-    const reader = readableStream.getReader();
-    const { Readable } = require('stream');
-    
-    return new Readable({
-        async read() {
-            try {
-                const { done, value } = await reader.read();
-                if (done) {
-                    this.push(null);
-                } else {
-                    this.push(Buffer.from(value));
-                }
-            } catch (err) {
-                this.destroy(err);
-            }
-        }
+  try {
+    // 1. Target URL se JSON data fetch karein
+    const response = await fetch(jsonUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json'
+      }
     });
+
+    if (!response.ok) {
+      return new Response("Failed to fetch source data", { status: response.status });
+    }
+
+    const data = await response.json();
+    const channels = data.channels || [];
+
+    // 2. M3U Playlist ka header shuru karein
+    let m3uOutput = "#EXTM3U\n";
+
+    // 3. Loop chalakar har ek channel ko OTT Navigator format me convert karein
+    channels.forEach(channel => {
+      const id = channel.id || "";
+      const name = channel.name || "";
+      const url = channel.url || "";
+      const logo = channel.logo || "";
+      const cookie = channel.cookie || "";
+      const keyId = channel.keyId || "";
+      const key = channel.key || "";
+
+      // tvg-id ke liye name me se spaces ko underscore se badlein ya id use karein
+      const tvgId = name.replace(/ /g, "_");
+
+      m3uOutput += `#EXTINF:-1 tvg-id="${tvgId}" tvg-name="${name}" tvg-logo="${logo}" group-title="⚡ LIVE TV",${name}\n`;
+      m3uOutput += `#KODIPROP:inputstream.adaptive.license_type=clearkey\n`;
+      m3uOutput += `#KODIPROP:inputstream.adaptive.license_key=${keyId}:${key}\n`;
+      m3uOutput += `#EXTHTTP:{"Cookie":"${cookie}"}\n`;
+      m3uOutput += `${url}\n\n`;
+    });
+
+    // 4. Plain Text response return karein taki app ise as a playlist read kar sake
+    return new Response(m3uOutput.trim(), {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Access-Control-Allow-Origin": "*", // CORS handles, taki kisi bhi player me chal sake
+        "Cache-Control": "public, max-age=60" // 1 minute caching taki bar-bar load hone par load na pade
+      }
+    });
+
+  } catch (error) {
+    return new Response("Error: " + error.message, { status: 500 });
+  }
 }
