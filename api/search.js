@@ -1,43 +1,38 @@
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    
-    // 1. URL se sirf Stream ID nikalna (e.g., ?id=660641)
-    const streamId = url.searchParams.get("id");
-    
-    if (!streamId) {
-      return new Response("Error: Stream ID missing!", { status: 400 });
+const fetch = require('node-fetch'); // Vercel Node.js environment ke liye
+
+module.exports = async (req, res) => {
+    // 1. URL se stream ID nikalna (?id=660641)
+    const { id } = req.query;
+
+    if (!id) {
+        return res.status(400).send("Error: Stream ID missing!");
     }
 
-    // 2. Yahan aap apna secret credential set karke rkhiljiye
-    // Kal ko agar host badle, toh bas yahan "datahub11.com" ko badal dena!
+    // 2. Apne credentials yahan secure rakhein
+    // Server badalne par bas yahan host change karein
     const currentHost = "http://datahub11.com"; 
     const username = "0AEHQ64ukI";
     const password = "50yxz17DyG";
 
-    // 3. Asli IPTV Server ka URL backend me taiyar karna
-    // Agar server format /live/user/pass/id hai ya index.php, us hisab se set karein:
-    const realIPTVURL = `${currentHost}/index.php?username=${username}&password=${password}&stream=${streamId}`;
+    // Asli IPTV URL taiyar karna
+    const realIPTVURL = `${currentHost}/index.php?username=${username}&password=${password}&stream=${id}`;
 
     try {
-      // 4. Cloudflare khud us server se video fetch karega (Proxy)
-      const response = await fetch(realIPTVURL, {
-        method: "GET",
-        headers: {
-          "User-Agent": request.headers.get("User-Agent") || "Mozilla/5.0",
-        }
-      });
+        // 3. IPTV Server se stream fetch karna
+        const response = await fetch(realIPTVURL, {
+            headers: {
+                'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0'
+            }
+        });
 
-      // 5. Video stream ko direct player (User) ko forward karna
-      const newResponse = new Response(response.body, response);
-      
-      // CORS errors se bachne ke liye headers (ताकि player me error na aaye)
-      newResponse.headers.set("Access-Control-Allow-Origin", "*");
-      
-      return newResponse;
+        // CORS Headers set karna taaki player me block na ho
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Content-Type', response.headers.get('content-type') || 'video/mp2t');
+
+        // 4. Video data ko client/player ko pipe (forward) karna
+        response.body.pipe(res);
 
     } catch (error) {
-      return new Response("Server Connection Error", { status: 500 });
+        return res.status(500).send("Server Connection Error");
     }
-  }
 };
