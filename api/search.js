@@ -1,72 +1,43 @@
-export default async function handler(req, res) {
-    // Enable CORS
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', '*');
-    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    
+    // 1. URL se sirf Stream ID nikalna (e.g., ?id=660641)
+    const streamId = url.searchParams.get("id");
+    
+    if (!streamId) {
+      return new Response("Error: Stream ID missing!", { status: 400 });
     }
 
-    const { search = '', type = 'live' } = req.query;
-
-    if (search.length < 3) {
-        return res.send("#EXTM3U\n#EXTINF:-1,Search min 3 chars\nhttp://google.com");
-    }
-
-    const host = "http://datahub11.com";
+    // 2. Yahan aap apna secret credential set karke rkhiljiye
+    // Kal ko agar host badle, toh bas yahan "datahub11.com" ko badal dena!
+    const currentHost = "http://datahub11.com"; 
     const username = "0AEHQ64ukI";
     const password = "50yxz17DyG";
 
-    let action = 'get_live_streams';
-    if (type === 'vod') action = 'get_vod_streams';
-    if (type === 'series') action = 'get_series';
-
-    const apiUrl = `${host}/player_api.php?username=${username}&password=${password}&action=${action}`;
+    // 3. Asli IPTV Server ka URL backend me taiyar karna
+    // Agar server format /live/user/pass/id hai ya index.php, us hisab se set karein:
+    const realIPTVURL = `${currentHost}/index.php?username=${username}&password=${password}&stream=${streamId}`;
 
     try {
-        const apiResponse = await fetch(apiUrl, {
-            method: 'GET',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
-        });
-
-        if (!apiResponse.ok) {
-            return res.send("#EXTM3U\n#EXTINF:-1,Server Connection Failed\nhttp://error.com");
+      // 4. Cloudflare khud us server se video fetch karega (Proxy)
+      const response = await fetch(realIPTVURL, {
+        method: "GET",
+        headers: {
+          "User-Agent": request.headers.get("User-Agent") || "Mozilla/5.0",
         }
+      });
 
-        const items = await apiResponse.json();
-
-        if (!Array.isArray(items)) {
-            return res.send("#EXTM3U\n#EXTINF:-1,Invalid Data From Provider\nhttp://error.com");
-        }
-
-        let m3uResponse = "#EXTM3U\n";
-        const query = search.toLowerCase();
-
-        for (const item of items) {
-            if (item.name && item.name.toLowerCase().includes(query)) {
-                let finalUrl = "";
-                
-                if (type === 'live') {
-                    finalUrl = `${host}/live/${username}/${password}/${item.stream_id}.ts`;
-                } else if (type === 'vod') {
-                    const ext = item.container_extension || 'mp4';
-                    finalUrl = `${host}/movie/${username}/${password}/${item.stream_id}.${ext}`;
-                } else if (type === 'series') {
-                    finalUrl = `SERIES_ID:${item.series_id}`;
-                }
-
-                const logo = item.cover || item.stream_icon || '';
-                m3uResponse += `#EXTINF:-1 tvg-logo="${logo}",${item.name}\n${finalUrl}\n`;
-            }
-        }
-
-        return res.send(m3uResponse);
+      // 5. Video stream ko direct player (User) ko forward karna
+      const newResponse = new Response(response.body, response);
+      
+      // CORS errors se bachne ke liye headers (ताकि player me error na aaye)
+      newResponse.headers.set("Access-Control-Allow-Origin", "*");
+      
+      return newResponse;
 
     } catch (error) {
-        return res.send("#EXTM3U\n#EXTINF:-1,Server Connection Failed\nhttp://error.com");
+      return new Response("Server Connection Error", { status: 500 });
     }
-}
+  }
+};
