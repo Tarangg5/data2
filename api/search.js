@@ -527,9 +527,15 @@ async function convertJsonToM3U(channels, config, requestUrl) {
 // 3. MAIN ROUTER
 // ==========================================
 
-addEventListener('fetch', event => {
-    event.respondWith(handleRequest(event.request));
-});
+// ISKO PASTE KAREIN:
+export const config = {
+    runtime: 'edge', // Vercel ko batayega ki ise Edge par chalana hai
+};
+
+export default async function handler(request) {
+    return handleRequest(request);
+}
+
 
 async function handleRequest(request) {
     const url = new URL(request.url);
